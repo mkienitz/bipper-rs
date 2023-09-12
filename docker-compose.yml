@@ -4,8 +4,10 @@ services:
   db:
     image: postgres
     restart: always
+    volumes:
+      - "./migrations:/docker-entrypoint-initdb.d"
     ports:
-          - 5432:5432
+      - 5432:5432
     environment:
       POSTGRES_PASSWORD: 12345
       POSTGRES_USER: postgres

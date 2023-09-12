@@ -1,0 +1,22 @@
+[package]
+name = "rbipper"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version="1.0.188",  features = ["derive"] }
+sqlx = { version = "0.7", features = [ "runtime-async-std", "postgres" ] }
+serde_json = "1.0.105"
+tide = "0.16.0"
+async-std = { version = "1.8.0", features = ["attributes"] }
+anyhow = "1.0.75"
+femme = "2.2.1"
+tempfile = "3.8.0"
+bip39 = "2.0.0"
+rand = "0.8.5"
+scrypt = { version = "0.11", default-features = false }
+aes-gcm = "0.10.2"
+hex = "0.4.3"
+dotenv = "0.15.0"

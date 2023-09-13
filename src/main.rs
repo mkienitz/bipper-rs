@@ -24,6 +24,6 @@ async fn main() -> tide::Result<()> {
     app.at("/").get(homepage_handler);
     app.at("/store/:file").post(store_handler);
     app.at("/retrieve").post(retrieve_handler);
-    app.listen("127.0.0.1:8080").await?;
+    app.listen("0.0.0.0:8080").await?;
     Ok(())
 }

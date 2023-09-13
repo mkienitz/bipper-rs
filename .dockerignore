@@ -1,0 +1,12 @@
+.direnv
+.env.example
+.envrc
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+flake.lock
+flake.nix
+migrations
+store
+target

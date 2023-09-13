@@ -1,9 +1,15 @@
 version: '3.1'
-
 services:
+  bipper:
+    build: .
+    image: bipper
+    restart: unless-stopped
+    container_name: "bipper"
+    networks:
+      - web
   db:
     image: postgres
-    restart: always
+    restart: unless-stopped
     volumes:
       - "./migrations:/docker-entrypoint-initdb.d"
     ports:
@@ -12,3 +18,9 @@ services:
       POSTGRES_PASSWORD: 12345
       POSTGRES_USER: postgres
       POSTGRES_DB: bipper
+    networks:
+      - default
+networks:
+  web:
+    external: true
+  default:

@@ -10,7 +10,11 @@ use tide::{http::mime, Body, Request, Response};
 
 use crate::database::Database;
 
-pub type State = Arc<Database>;
+pub struct AppState {
+    pub db: Database,
+}
+
+pub type State = Arc<AppState>;
 
 pub async fn retrieve_handler(mut req: Request<State>) -> tide::Result {
     #[derive(Deserialize)]
@@ -20,7 +24,7 @@ pub async fn retrieve_handler(mut req: Request<State>) -> tide::Result {
     let BodyParam { mnemonic } = req.body_form().await?;
     let passphrase_hash = calculate_passphrase_hash(&mnemonic).await?;
 
-    let metadata = req.state().find_blob(&passphrase_hash).await?;
+    let metadata = req.state().db.find_blob(&passphrase_hash).await?;
 
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -46,7 +50,7 @@ pub async fn store_handler(mut req: Request<State>) -> tide::Result {
     let file_name = req.param("file")?;
     let (mnemonic, metadata) = encrypt_file(&mut bytes, file_name).await?;
 
-    req.state().insert_blob(&metadata).await?;
+    req.state().db.insert_blob(&metadata).await?;
 
     let mut file = fs::OpenOptions::new()
         .create(true)

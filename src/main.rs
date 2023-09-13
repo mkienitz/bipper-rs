@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dotenv::dotenv;
-use rbipper::database::Database;
-use rbipper::handlers::{homepage_handler, retrieve_handler, store_handler, AppState, State};
+use bipper::database::Database;
+use bipper::handlers::{homepage_handler, retrieve_handler, store_handler, AppState, State};
 use std::sync::Arc;
 use std::{env, fs};
 

@@ -3,6 +3,7 @@ use sqlx::{postgres::PgPoolOptions, PgPool};
 
 use crate::models::BlobMetadata;
 
+#[derive(Clone)]
 pub struct Database {
     pool: PgPool,
 }

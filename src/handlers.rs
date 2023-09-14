@@ -1,30 +1,54 @@
+use crate::crypto::{calculate_passphrase_hash, decrypt_file, encrypt_file};
+use crate::database::Database;
+use anyhow::anyhow;
+use axum::{
+    extract::{Multipart, State},
+    http::header::{self, HeaderMap},
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+    Form,
+};
+use serde::Deserialize;
 use std::{
     fs,
     io::{Read, Write},
-    sync::Arc,
 };
+use tracing::log::trace;
 
-use crate::crypto::{calculate_passphrase_hash, decrypt_file, encrypt_file};
-use serde::Deserialize;
-use tide::{http::mime, Body, Request, Response};
-
-use crate::database::Database;
-
+#[derive(Clone)]
 pub struct AppState {
     pub db: Database,
 }
 
-pub type State = Arc<AppState>;
+pub struct AppError(anyhow::Error);
 
-pub async fn retrieve_handler(mut req: Request<State>) -> tide::Result {
-    #[derive(Deserialize)]
-    struct BodyParam {
-        mnemonic: String,
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        trace!("{}", self.0);
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
-    let BodyParam { mnemonic } = req.body_form().await?;
-    let passphrase_hash = calculate_passphrase_hash(&mnemonic).await?;
+}
 
-    let metadata = req.state().db.find_blob(&passphrase_hash).await?;
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RetrievalForm {
+    mnemonic: String,
+}
+
+pub async fn retrieve_handler(
+    State(state): State<AppState>,
+    Form(retrieval_form): Form<RetrievalForm>,
+) -> Result<impl IntoResponse, AppError> {
+    let passphrase_hash = calculate_passphrase_hash(&retrieval_form.mnemonic).await?;
+    let metadata = state.db.find_blob(&passphrase_hash).await?;
 
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -32,54 +56,41 @@ pub async fn retrieve_handler(mut req: Request<State>) -> tide::Result {
     let mut content_bytes: Vec<u8> = Vec::new();
     file.read_to_end(&mut content_bytes)?;
 
-    let filename = decrypt_file(&mut content_bytes, &mnemonic, &metadata).await?;
+    let filename = decrypt_file(&mut content_bytes, &retrieval_form.mnemonic, &metadata).await?;
 
-    let response = Response::builder(200)
-        .body(Body::from_bytes(content_bytes))
-        .header(
-            "Content-Disposition",
-            format!("attachment; filename={}", filename),
-        )
-        .content_type(mime::BYTE_STREAM)
-        .build();
-    Ok(response)
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse()?);
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        (&format!("attachment; filename={}", filename)).parse()?,
+    );
+
+    Ok((headers, content_bytes))
 }
 
-pub async fn store_handler(mut req: Request<State>) -> tide::Result {
-    let mut bytes = req.body_bytes().await?;
-    let file_name = req.param("file")?;
-    let (mnemonic, metadata) = encrypt_file(&mut bytes, file_name).await?;
-
-    req.state().db.insert_blob(&metadata).await?;
-
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(format!("store/{}", metadata.filename))?;
-    file.write_all(&bytes)?;
-
-    tide::log::info!("File written!");
-    Ok(mnemonic.into())
+pub async fn store_handler(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, AppError> {
+    if let Some(field) = multipart.next_field().await? {
+        let filename = field
+            .file_name()
+            .ok_or(anyhow!("Field contains no filename!"))?
+            .to_owned();
+        let mut bytes = field.bytes().await?.into();
+        let (mnemonic, metadata) = encrypt_file(&mut bytes, &filename).await?;
+        state.db.insert_blob(&metadata).await?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(format!("store/{}", metadata.filename))?;
+        file.write_all(&bytes)?;
+        Ok(mnemonic)
+    } else {
+        Err(anyhow!("No field found!").into())
+    }
 }
 
-pub async fn homepage_handler(_req: Request<State>) -> tide::Result {
-    let response = Response::builder(200)
-        .body(
-            r#"
-            <html>
-                <head>
-                    <title>Bipper</title>
-                </head>
-                <body>
-                    <form action="/retrieve" method="post" target="_blank">
-                        <label for="words">BIP39 words:</label><br>
-                        <input type="text" id="words" name="mnemonic" value=""><br>
-                        <input type="submit" value="Submit">
-                    </form>
-                </body>
-            </html>"#,
-        )
-        .content_type(mime::HTML)
-        .build();
-    Ok(response)
+pub async fn homepage_handler() -> Result<impl IntoResponse, AppError> {
+    Ok(Html(fs::read_to_string("index.html")?))
 }

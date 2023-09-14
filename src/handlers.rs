@@ -91,6 +91,6 @@ pub async fn store_handler(
     }
 }
 
-pub async fn homepage_handler() -> Result<impl IntoResponse, AppError> {
-    Ok(Html(fs::read_to_string("index.html")?))
+pub async fn homepage_handler() -> impl IntoResponse  {
+    Html(include_str!("index.html"))
 }

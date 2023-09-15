@@ -18,17 +18,7 @@ impl Database {
     }
 
     pub async fn create_tables(self: &Self) -> Result<()> {
-        sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS blobs (
-                passphrase_hash BYTEA NOT NULL PRIMARY KEY,
-                filename VARCHAR(255) NOT NULL,
-                content_nonce BYTEA NOT NULL,
-                filename_nonce BYTEA NOT NULL
-            )"#,
-        )
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+        Ok(sqlx::migrate!("./migrations").run(&self.pool).await?)
     }
 
     pub async fn insert_blob(self: &Self, metadata: &BlobMetadata) -> Result<()> {

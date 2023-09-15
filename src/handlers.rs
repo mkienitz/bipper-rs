@@ -48,18 +48,18 @@ pub async fn retrieve_handler(
     Form(retrieval_form): Form<MnemonicForm>,
 ) -> Result<impl IntoResponse, AppError> {
     let passphrase_hash = calculate_passphrase_hash(&retrieval_form.mnemonic).await?;
-    let metadata = state.db.find_blob(&passphrase_hash).await?;
+    let mut metadata = state.db.find_blob(&passphrase_hash).await?;
     let mut file = fs::OpenOptions::new()
         .read(true)
-        .open(format!("store/{}", metadata.filename))?;
+        .open(format!("store/{}", hex::encode(passphrase_hash)))?;
     let mut content_bytes: Vec<u8> = Vec::new();
     file.read_to_end(&mut content_bytes)?;
-    let filename = decrypt_file(&mut content_bytes, &retrieval_form.mnemonic, &metadata).await?;
+    decrypt_file(&mut content_bytes, &retrieval_form.mnemonic, &mut metadata).await?;
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse()?);
     headers.insert(
         header::CONTENT_DISPOSITION,
-        (&format!("attachment; filename={}", filename)).parse()?,
+        (&format!("attachment; filename={}", String::from_utf8(metadata.filename)?)).parse()?,
     );
     Ok((headers, content_bytes))
 }
@@ -79,7 +79,7 @@ pub async fn store_handler(
         let mut file = fs::OpenOptions::new()
             .create(true)
             .write(true)
-            .open(format!("store/{}", metadata.filename))?;
+            .open(format!("store/{}", hex::encode(metadata.passphrase_hash)))?;
         file.write_all(&bytes)?;
         Ok(mnemonic)
     } else {
@@ -92,8 +92,8 @@ pub async fn delete_handler(
     Form(delete_form): Form<MnemonicForm>,
 ) -> Result<impl IntoResponse, AppError> {
     let passphrase_hash = calculate_passphrase_hash(&delete_form.mnemonic).await?;
-    let metadata = state.db.delete_blob(&passphrase_hash).await?;
-    fs::remove_file(format!("store/{}", metadata.filename))?;
+    state.db.delete_blob(&passphrase_hash).await?;
+    fs::remove_file(format!("store/{}", hex::encode(passphrase_hash)))?;
     Ok("File successfully deleted!")
 }
 

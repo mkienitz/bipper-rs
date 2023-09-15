@@ -56,7 +56,7 @@ pub async fn encrypt_file(bytes: &mut Vec<u8>, filename: &str) -> Result<(String
         mnemonic,
         BlobMetadata {
             passphrase_hash: passphrase_hash.to_vec(),
-            filename: hex::encode(filename_bytes),
+            filename: filename_bytes,
             content_nonce: content_nonce.to_vec(),
             filename_nonce: filename_nonce.to_vec(),
         },
@@ -71,16 +71,15 @@ pub async fn calculate_passphrase_hash(mnemonic: &str) -> Result<Vec<u8>> {
 pub async fn decrypt_file(
     content_bytes: &mut Vec<u8>,
     mnemonic: &str,
-    meta: &BlobMetadata,
-) -> Result<String> {
+    meta: &mut BlobMetadata,
+) -> Result<()> {
     let entropy = bip39::Mnemonic::from_str(&mnemonic)?.to_entropy();
 
     let content_key = derive_key(&entropy, "content")?;
     let filename_key = derive_key(&entropy, "filename")?;
 
-    let mut filename_bytes = hex::decode(meta.filename.clone())?;
     decrypt(
-        &mut filename_bytes,
+        &mut meta.filename,
         &filename_key,
         NonceType::from_slice(&meta.filename_nonce),
     )?;
@@ -89,5 +88,5 @@ pub async fn decrypt_file(
         &content_key,
         NonceType::from_slice(&meta.content_nonce),
     )?;
-    Ok(String::from_utf8(filename_bytes)?)
+    Ok(())
 }

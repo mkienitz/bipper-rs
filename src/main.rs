@@ -3,7 +3,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use bipper::database::Database;
-use bipper::handlers::{homepage_handler, retrieve_handler, store_handler, AppState};
+use bipper::handlers::{homepage_handler, retrieve_handler, store_handler, AppState, delete_handler};
 use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::{env, fs};
@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
         .route("/", get(homepage_handler))
         .route("/store", post(store_handler))
         .route("/retrieve", post(retrieve_handler))
+        .route("/delete", post(delete_handler))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));

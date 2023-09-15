@@ -1,17 +1,22 @@
 <html>
-  <head>
+<head>
     <title>Bipper</title>
-  </head>
-  <body>
-    <h2>Upload file</h2>
-    <form action="/store" method="POST" enctype="multipart/form-data">
-      <input type="file" id="file" name="file" /><br />
-      <input type="submit" value="Upload File" />
-    </form>
-    <h2>Retrieve file</h2>
-    <form action="/retrieve" method="post" target="_blank">
-      <input type="text" id="mnemonic" name="mnemonic" /><br />
-      <input type="submit" value="Retrieve File" />
-    </form>
-  </body>
+</head>
+<body>
+<h2>Upload file</h2>
+<form action="/store" method="post" enctype="multipart/form-data">
+    <input type="file" name="file"/><br/>
+    <input type="submit" value="Upload File"/>
+</form>
+<h2>Retrieve file</h2>
+<form action="/retrieve" method="post" target="_blank">
+    <input type="text" name="mnemonic"/><br/>
+    <input type="submit" value="Retrieve File"/>
+</form>
+<h2>Delete file</h2>
+<form action="/delete" method="post" target="_blank">
+    <input type="text" name="mnemonic"/><br/>
+    <input type="submit" value="Delete File"/>
+</form>
+</body>
 </html>

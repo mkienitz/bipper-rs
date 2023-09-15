@@ -44,4 +44,11 @@ impl Database {
                 .await?;
         Ok(metadata)
     }
+    pub async fn delete_blob(self: &Self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
+        let metadata = sqlx::query_as::<_, BlobMetadata>(r#"DELETE FROM blobs WHERE passphrase_hash = $1 RETURNING *"#)
+            .bind(&passphrase_hash)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(metadata)
+    }
 }

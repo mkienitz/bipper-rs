@@ -1,8 +1,9 @@
-<html>
+<html lang="en">
 <head>
     <title>Bipper</title>
 </head>
 <body>
+<h1>Bipper</h1>
 <h2>Upload file</h2>
 <form action="/store" method="post" enctype="multipart/form-data">
     <input type="file" name="file"/><br/>
@@ -10,12 +11,12 @@
 </form>
 <h2>Retrieve file</h2>
 <form action="/retrieve" method="post" target="_blank">
-    <input type="text" name="mnemonic"/><br/>
+    <input type="text" name="mnemonic" placeholder="BIP39 mnemonic"/><br/>
     <input type="submit" value="Retrieve File"/>
 </form>
 <h2>Delete file</h2>
 <form action="/delete" method="post" target="_blank">
-    <input type="text" name="mnemonic"/><br/>
+    <input type="text" name="mnemonic" placeholder="BIP39 mnemonic"/><br/>
     <input type="submit" value="Delete File"/>
 </form>
 </body>

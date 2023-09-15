@@ -3,7 +3,9 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use bipper::database::Database;
-use bipper::handlers::{homepage_handler, retrieve_handler, store_handler, AppState, delete_handler};
+use bipper::handlers::{
+    delete_handler, homepage_handler, retrieve_handler, store_handler, AppState,
+};
 use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::{env, fs};

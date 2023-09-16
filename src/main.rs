@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let state = setup().await?;
     let app = Router::new()
         .route("/", get(homepage_handler))
-        .route("/store", post(store_handler))
+        .route("/store/:filename", post(store_handler))
         .route("/retrieve", post(retrieve_handler))
         .route("/delete", post(delete_handler))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))

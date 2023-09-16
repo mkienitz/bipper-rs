@@ -1,19 +1,14 @@
-use crate::crypto::{calculate_passphrase_hash, decrypt_file, encrypt_file};
+use crate::crypto::{calculate_passphrase_hash, DecryptionState, EncryptionState};
 use crate::database::Database;
-use anyhow::anyhow;
+use axum::body::StreamBody;
 use axum::{
-    extract::{Multipart, State},
-    http::header::{self, HeaderMap},
-    http::StatusCode,
+    extract::{BodyStream, Json, Path, State},
+    http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
-    Form,
 };
+use futures_util::{stream, StreamExt};
 use serde::Deserialize;
-use std::{
-    fs,
-    io::{Read, Write},
-};
-use tracing::log::trace;
+use tokio::fs;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -24,8 +19,11 @@ pub struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        trace!("{}", self.0);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Something went wrong: {}", self.0),
+        )
+            .into_response()
     }
 }
 
@@ -39,61 +37,57 @@ where
 }
 
 #[derive(Deserialize)]
-pub struct MnemonicForm {
+pub struct AccessInfo {
     mnemonic: String,
 }
 
 pub async fn retrieve_handler(
     State(state): State<AppState>,
-    Form(retrieval_form): Form<MnemonicForm>,
+    Json(access_info): Json<AccessInfo>,
 ) -> Result<impl IntoResponse, AppError> {
-    let passphrase_hash = calculate_passphrase_hash(&retrieval_form.mnemonic).await?;
-    let mut metadata = state.db.find_blob(&passphrase_hash).await?;
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .open(format!("store/{}", hex::encode(passphrase_hash)))?;
-    let mut content_bytes: Vec<u8> = Vec::new();
-    file.read_to_end(&mut content_bytes)?;
-    decrypt_file(&mut content_bytes, &retrieval_form.mnemonic, &mut metadata).await?;
-    let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse()?);
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        (&format!("attachment; filename={}", String::from_utf8(metadata.filename)?)).parse()?,
-    );
-    Ok((headers, content_bytes))
+    let passphrase_hash = calculate_passphrase_hash(&access_info.mnemonic).await?;
+    let metadata = state.db.find_blob(&passphrase_hash).await?;
+
+    let storage_path = format!("store/{}", hex::encode(passphrase_hash));
+    let decryption_state =
+        DecryptionState::new(storage_path, &access_info.mnemonic, metadata).await?;
+    let filename = decryption_state.filename()?;
+
+    let body_stream = stream::iter(decryption_state);
+    let body = StreamBody::new(body_stream);
+
+    let headers = [
+        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+        (
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename={}", filename),
+        ),
+    ];
+
+    Ok((headers, body))
 }
 
 pub async fn store_handler(
     State(state): State<AppState>,
-    mut multipart: Multipart,
+    Path(filename): Path<String>,
+    mut stream: BodyStream,
 ) -> Result<impl IntoResponse, AppError> {
-    if let Some(field) = multipart.next_field().await? {
-        let filename = field
-            .file_name()
-            .ok_or(anyhow!("Field contains no filename!"))?
-            .to_owned();
-        let mut bytes = field.bytes().await?.into();
-        let (mnemonic, metadata) = encrypt_file(&mut bytes, &filename).await?;
-        state.db.insert_blob(&metadata).await?;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(format!("store/{}", hex::encode(metadata.passphrase_hash)))?;
-        file.write_all(&bytes)?;
-        Ok(mnemonic)
-    } else {
-        Err(anyhow!("No field found!").into())
+    let mut enc_state = EncryptionState::new(&filename).await?;
+    while let Some(chunk) = stream.next().await {
+        enc_state.update(&chunk?).await?;
     }
+    let (mnemonic, metadata) = enc_state.finalize().await?;
+    state.db.insert_blob(&metadata).await?;
+    Ok(mnemonic)
 }
 
 pub async fn delete_handler(
     State(state): State<AppState>,
-    Form(delete_form): Form<MnemonicForm>,
+    Json(access_info): Json<AccessInfo>,
 ) -> Result<impl IntoResponse, AppError> {
-    let passphrase_hash = calculate_passphrase_hash(&delete_form.mnemonic).await?;
+    let passphrase_hash = calculate_passphrase_hash(&access_info.mnemonic).await?;
     state.db.delete_blob(&passphrase_hash).await?;
-    fs::remove_file(format!("store/{}", hex::encode(passphrase_hash)))?;
+    fs::remove_file(format!("store/{}", hex::encode(passphrase_hash))).await?;
     Ok("File successfully deleted!")
 }
 

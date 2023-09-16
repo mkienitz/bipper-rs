@@ -6,5 +6,5 @@ pub struct BlobMetadata {
     pub filename: Vec<u8>,
     pub content_nonce: Vec<u8>,
     pub filename_nonce: Vec<u8>,
+    pub cipher_hash: String,
 }
-

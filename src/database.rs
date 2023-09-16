@@ -17,38 +17,39 @@ impl Database {
         Ok(Database { pool })
     }
 
-    pub async fn create_tables(self: &Self) -> Result<()> {
+    pub async fn create_tables(&self) -> Result<()> {
         Ok(sqlx::migrate!("./migrations").run(&self.pool).await?)
     }
 
-    pub async fn insert_blob(self: &Self, metadata: &BlobMetadata) -> Result<()> {
+    pub async fn insert_blob(&self, metadata: &BlobMetadata) -> Result<()> {
         sqlx::query(
             r#"INSERT INTO blobs
-                    (passphrase_hash, filename, content_nonce, filename_nonce)
-                    VALUES ($1, $2, $3, $4)"#,
+                    (passphrase_hash, filename, content_nonce, filename_nonce, cipher_hash)
+                    VALUES ($1, $2, $3, $4, $5)"#,
         )
         .bind(&metadata.passphrase_hash)
         .bind(&metadata.filename)
         .bind(&metadata.content_nonce)
         .bind(&metadata.filename_nonce)
+        .bind(&metadata.cipher_hash)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    pub async fn find_blob(self: &Self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
+    pub async fn find_blob(&self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
         let metadata =
             sqlx::query_as::<_, BlobMetadata>(r#"SELECT * FROM blobs WHERE passphrase_hash = $1"#)
-                .bind(&passphrase_hash)
+                .bind(passphrase_hash)
                 .fetch_one(&self.pool)
                 .await?;
         Ok(metadata)
     }
-    pub async fn delete_blob(self: &Self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
+    pub async fn delete_blob(&self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
         let metadata = sqlx::query_as::<_, BlobMetadata>(
             r#"DELETE FROM blobs WHERE passphrase_hash = $1 RETURNING *"#,
         )
-        .bind(&passphrase_hash)
+        .bind(passphrase_hash)
         .fetch_one(&self.pool)
         .await?;
         Ok(metadata)

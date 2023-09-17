@@ -5,6 +5,8 @@ services:
     image: bipper
     restart: unless-stopped
     container_name: "bipper"
+    environment:
+      - RUST_LOG=DEBUG
     networks:
       - web
       - default

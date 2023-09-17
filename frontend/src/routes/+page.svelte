@@ -11,10 +11,44 @@
 	function clearInput() {
 		inputText = '';
 	}
-	function downloadBip() {
-		inputText = '';
+
+	async function downloadBip() {
+		const response = await fetch(`${hostname}/retrieve`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				mnemonic: inputText
+			})
+		});
+		const header = response.headers.get('Content-Disposition');
+		const parts = header!.split(';');
+		const filename = parts[1].split('=')[1];
+		response.blob().then((blob) => {
+			const blobURL = window.URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.style.display = 'none';
+			anchor.href = blobURL;
+			anchor.download = filename;
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			window.URL.revokeObjectURL(blobURL);
+		});
 	}
-	function deleteBip() {
+
+	async function deleteBip() {
+		const response = await fetch(`${hostname}/delete`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				mnemonic: inputText
+			})
+		});
+		console.log(response.status);
 		inputText = '';
 	}
 
@@ -41,7 +75,7 @@
 	}
 </script>
 
-<div class="flex flex-col space-y-2">
+<div class="flex flex-col mx-3 w-full max-w-2xl space-y-2">
 	<div class="flex flex-col space-y-2">
 		<div class="flex flex-col justify-center h-32 items-center rounded-xl border border-dashed">
 			<p class="p-4">Drag a file here to upload!</p>
@@ -63,7 +97,7 @@
 	<div class="flex flex-row border divide-x">
 		<input
 			bind:value={inputText}
-			class="flex-grow bg-transparent p-2 text-center truncate"
+			class="flex-grow flex-none bg-transparent p-2 text-center truncate"
 			placeholder="Enter your BIP39 passphrase"
 		/>
 		<button on:click={clearInput} class="p-2">Clear</button>

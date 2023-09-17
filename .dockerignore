@@ -7,6 +7,5 @@ Dockerfile
 docker-compose.yml
 flake.lock
 flake.nix
-migrations
 store
 target

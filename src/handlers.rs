@@ -78,7 +78,8 @@ pub async fn store_handler(
     }
     let (mnemonic, metadata) = enc_state.finalize().await?;
     state.db.insert_blob(&metadata).await?;
-    Ok(mnemonic)
+    let headers = [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")];
+    Ok((headers, mnemonic))
 }
 
 pub async fn delete_handler(

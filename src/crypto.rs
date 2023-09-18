@@ -81,7 +81,6 @@ impl EncryptionState {
             .open(file_path)
             .await?;
 
-        // Remainder buffer to avoid padding
         Ok(EncryptionState {
             encryptor,
             file,
@@ -131,6 +130,7 @@ pub struct DecryptionState {
     metadata: BlobMetadata,
     buffer: Box<[u8; DECRYPTION_BUFSIZE]>,
     buf_used: usize,
+    remaining_length: u64,
 }
 
 impl Iterator for DecryptionState {
@@ -139,21 +139,37 @@ impl Iterator for DecryptionState {
     fn next(&mut self) -> Option<Self::Item> {
         match self.file.read(&mut self.buffer[self.buf_used..]) {
             Ok(0) => None,
-            Ok(bytes_written) => {
-                let curr_size = bytes_written + self.buf_used;
-
-                let chunks = self.buffer[..curr_size].chunks_exact_mut(Aes256CbcEnc::block_size());
+            Ok(bytes_read) => {
+                // New buffer size includes last call's remaining bytes
+                let curr_size = bytes_read + self.buf_used;
+                // Deal with unpadded blocks first
+                // Make sure we don't greedily consume the potentially padded block
+                //                                   ___
+                let chunks = self.buffer[..curr_size - 1].chunks_exact_mut(BLOCK_SIZE);
+                let mut n_decrypted = BLOCK_SIZE * chunks.len();
                 for chunk in chunks {
                     self.decryptor.decrypt_block_mut(chunk.into());
                 }
+                self.remaining_length -= n_decrypted as u64;
 
-                let rem_size = curr_size % BLOCK_SIZE;
-                let superblock_size = curr_size - rem_size;
-
-                let res = self.buffer[..superblock_size].to_vec();
-                self.buffer.copy_within(superblock_size..curr_size, 0);
-                self.buf_used = rem_size;
-                Some(Ok(res))
+                // Handle padded block
+                if self.remaining_length == BLOCK_SIZE as u64 {
+                    let padded_chunk = &mut self.buffer[n_decrypted..curr_size];
+                    // The following clone is necessary because the Decryptor object consumes
+                    // itself upon decrypt_padded(_mut)
+                    let dc = self.decryptor.clone();
+                    let unpadded_chunk = match dc.decrypt_padded_mut::<Pkcs7>(padded_chunk) {
+                        Ok(slice) => slice,
+                        Err(e) => return Some(Err(anyhow!(e).context("Failed to unpad"))),
+                    };
+                    n_decrypted += unpadded_chunk.len();
+                    Some(Ok(self.buffer[..n_decrypted].to_vec()))
+                } else {
+                    let res = self.buffer[..n_decrypted].to_vec();
+                    // Copy unprocessed bytes to the beginning of the buffer for the next iteration
+                    self.buffer.copy_within(n_decrypted..curr_size, 0);
+                    Some(Ok(res))
+                }
             }
             Err(e) => {
                 panic!("{e}")
@@ -178,6 +194,8 @@ impl DecryptionState {
             metadata.content_nonce.as_slice().into(),
         );
 
+        let remaining_length = file.metadata()?.len();
+
         Ok(DecryptionState {
             file,
             decryptor,
@@ -185,6 +203,7 @@ impl DecryptionState {
             metadata,
             buffer: Box::new([0u8; DECRYPTION_BUFSIZE]),
             buf_used: 0,
+            remaining_length,
         })
     }
 

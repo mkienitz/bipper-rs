@@ -1,4 +1,4 @@
-use crate::crypto::{calculate_passphrase_hash, DecryptionState, EncryptionState};
+use crate::crypto::{calculate_passphrase_hash, DecryptionIter, EncryptionState, DecryptionState, restore_filename};
 use crate::database::Database;
 use axum::body::StreamBody;
 use axum::{
@@ -47,13 +47,15 @@ pub async fn retrieve_handler(
 ) -> Result<impl IntoResponse, AppError> {
     let passphrase_hash = calculate_passphrase_hash(&access_info.mnemonic).await?;
     let metadata = state.db.find_blob(&passphrase_hash).await?;
-
     let storage_path = format!("store/{}", hex::encode(passphrase_hash));
-    let decryption_state =
-        DecryptionState::new(storage_path, &access_info.mnemonic, metadata).await?;
-    let filename = decryption_state.filename()?;
+    let filename = restore_filename(&access_info.mnemonic, &metadata)?;
 
-    let body_stream = stream::iter(decryption_state);
+    let decryption_state =
+        DecryptionState::new(&access_info.mnemonic, metadata).await?;
+    let decryption_iter = DecryptionIter::new(&storage_path, decryption_state)?;
+
+
+    let body_stream = stream::iter(decryption_iter);
     let body = StreamBody::new(body_stream);
 
     let headers = [

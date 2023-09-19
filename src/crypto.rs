@@ -30,6 +30,21 @@ pub async fn calculate_passphrase_hash(mnemonic: &str) -> Result<Vec<u8>> {
     derive_key(&entropy, "passphrase")
 }
 
+pub fn restore_filename(mnemonic: &str, metadata: &BlobMetadata) -> Result<String> {
+    let entropy = bip39::Mnemonic::from_str(mnemonic)?.to_entropy();
+    let filename_key = derive_key(&entropy, "filename")?;
+    let filename_decryptor = Aes256CbcDec::new(
+        filename_key.as_slice().into(),
+        metadata.filename_nonce.as_slice().into(),
+    );
+
+    Ok(String::from_utf8(
+        filename_decryptor
+            .decrypt_padded_vec_mut::<Pkcs7>(&metadata.filename)
+            .map_err(|e| anyhow!(e))?,
+    )?)
+}
+
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 const BLOCK_SIZE: usize = <Aes256CbcEnc as BlockSizeUser>::BlockSize::USIZE;
@@ -111,64 +126,78 @@ impl EncryptionState {
 
     pub async fn finalize(mut self) -> Result<(String, BlobMetadata)> {
         let mut rem_buf = [0u8; BLOCK_SIZE];
-        if !self.buffer.is_empty() {
-            self.encryptor
-                .encrypt_padded_b2b_mut::<Pkcs7>(&self.buffer, &mut rem_buf)
-                .map_err(|e| anyhow!(e))?;
-            self.file.write_all(&rem_buf).await?;
-        }
+        self.encryptor
+            .encrypt_padded_b2b_mut::<Pkcs7>(&self.buffer, &mut rem_buf)
+            .map_err(|e| anyhow!(e))?;
+        self.file.write_all(&rem_buf).await?;
         self.metadata.cipher_hash = sha256::try_digest(self.file_path)?;
         Ok((self.mnemonic.to_string(), self.metadata))
     }
 }
 
 const DECRYPTION_BUFSIZE: usize = 32;
-pub struct DecryptionState {
+pub struct DecryptionIter {
     file: fs::File,
-    decryptor: Aes256CbcDec,
-    entropy: Vec<u8>,
-    metadata: BlobMetadata,
     buffer: Box<[u8; DECRYPTION_BUFSIZE]>,
     buf_used: usize,
+    decryption_state: DecryptionState,
     remaining_length: u64,
 }
 
-impl Iterator for DecryptionState {
+impl DecryptionIter {
+    pub fn new(filename: &str, decryption_state: DecryptionState) -> Result<Self> {
+        let file = fs::OpenOptions::new().read(true).open(filename)?;
+        let remaining_length = file.metadata()?.len();
+
+        Ok(DecryptionIter {
+            file,
+            decryption_state,
+            buffer: Box::new([0u8; DECRYPTION_BUFSIZE]),
+            buf_used: 0,
+            remaining_length,
+        })
+    }
+}
+
+impl Iterator for DecryptionIter {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.file.read(&mut self.buffer[self.buf_used..]) {
             Ok(0) => None,
             Ok(bytes_read) => {
-                // New buffer size includes last call's remaining bytes
                 let curr_size = bytes_read + self.buf_used;
-                // Deal with unpadded blocks first
-                // Make sure we don't greedily consume the potentially padded block
-                //                                   ___
-                let chunks = self.buffer[..curr_size - 1].chunks_exact_mut(BLOCK_SIZE);
-                let mut n_decrypted = BLOCK_SIZE * chunks.len();
-                for chunk in chunks {
-                    self.decryptor.decrypt_block_mut(chunk.into());
-                }
-                self.remaining_length -= n_decrypted as u64;
-
-                // Handle padded block
-                if self.remaining_length == BLOCK_SIZE as u64 {
-                    let padded_chunk = &mut self.buffer[n_decrypted..curr_size];
-                    // The following clone is necessary because the Decryptor object consumes
-                    // itself upon decrypt_padded(_mut)
-                    let dc = self.decryptor.clone();
-                    let unpadded_chunk = match dc.decrypt_padded_mut::<Pkcs7>(padded_chunk) {
+                // Check if this is the last call to next()
+                if curr_size == self.remaining_length as usize {
+                    // Last block of file is in our buffer
+                    if curr_size > BLOCK_SIZE {
+                        // We also have unpadded blocks
+                        self.decryption_state
+                            .update(&mut self.buffer[..curr_size - BLOCK_SIZE]);
+                    }
+                    // Also works if there were no unpadded blocks
+                    let last_block_size = match self
+                        .decryption_state
+                        .finalize(&mut self.buffer[curr_size - BLOCK_SIZE..curr_size])
+                    {
                         Ok(slice) => slice,
-                        Err(e) => return Some(Err(anyhow!(e).context("Failed to unpad"))),
+                        Err(e) => {
+                            return Some(Err(anyhow!(e)));
+                        }
                     };
-                    n_decrypted += unpadded_chunk.len();
-                    Some(Ok(self.buffer[..n_decrypted].to_vec()))
+                    Some(Ok(
+                        self.buffer[..curr_size - BLOCK_SIZE + last_block_size].to_vec()
+                    ))
                 } else {
-                    let res = self.buffer[..n_decrypted].to_vec();
-                    // Copy unprocessed bytes to the beginning of the buffer for the next iteration
-                    self.buffer.copy_within(n_decrypted..curr_size, 0);
-                    Some(Ok(res))
+                    // Only unpadded blocks, more to come
+                    let superblock_size = curr_size - curr_size % BLOCK_SIZE;
+                    self.decryption_state
+                        .update(&mut self.buffer[..superblock_size]);
+                    self.buf_used = curr_size - superblock_size;
+                    self.remaining_length -= superblock_size as u64;
+                    self.buffer.copy_within(superblock_size..curr_size, 0);
+                    // debug!("Enjoy Partial {superblock_size}");
+                    Some(Ok(self.buffer[..superblock_size].to_vec()))
                 }
             }
             Err(e) => {
@@ -178,14 +207,12 @@ impl Iterator for DecryptionState {
     }
 }
 
-impl DecryptionState {
-    pub async fn new(
-        storage_path: String,
-        mnemonic_str: &str,
-        metadata: BlobMetadata,
-    ) -> Result<Self> {
-        let file = fs::OpenOptions::new().read(true).open(storage_path)?;
+pub struct DecryptionState {
+    decryptor: Aes256CbcDec,
+}
 
+impl DecryptionState {
+    pub async fn new(mnemonic_str: &str, metadata: BlobMetadata) -> Result<Self> {
         let entropy = bip39::Mnemonic::from_str(mnemonic_str)?.to_entropy();
         let content_key = derive_key(&entropy, "content")?;
 
@@ -194,30 +221,24 @@ impl DecryptionState {
             metadata.content_nonce.as_slice().into(),
         );
 
-        let remaining_length = file.metadata()?.len();
-
-        Ok(DecryptionState {
-            file,
-            decryptor,
-            entropy,
-            metadata,
-            buffer: Box::new([0u8; DECRYPTION_BUFSIZE]),
-            buf_used: 0,
-            remaining_length,
-        })
+        Ok(DecryptionState { decryptor })
     }
 
-    pub fn filename(&self) -> Result<String> {
-        let filename_key = derive_key(&self.entropy, "filename")?;
-        let filename_decryptor = Aes256CbcDec::new(
-            filename_key.as_slice().into(),
-            self.metadata.filename_nonce.as_slice().into(),
-        );
+    pub fn update(&mut self, blocks: &mut [u8]) {
+        assert!(blocks.len() % BLOCK_SIZE == 0);
+        let chunks = blocks.chunks_exact_mut(BLOCK_SIZE);
+        for chunk in chunks {
+            self.decryptor.decrypt_block_mut(chunk.into());
+        }
+    }
 
-        Ok(String::from_utf8(
-            filename_decryptor
-                .decrypt_padded_vec_mut::<Pkcs7>(&self.metadata.filename)
-                .map_err(|e| anyhow!(e))?,
-        )?)
+    pub fn finalize(&mut self, padded_chunk: &mut [u8]) -> Result<usize> {
+        let dc = self.decryptor.clone();
+        let unpadded_chunk = match dc.decrypt_padded_mut::<Pkcs7>(padded_chunk) {
+            Ok(slice) => slice,
+            Err(e) => return Err(anyhow!(e)),
+        };
+        // Ok(unpadded_chunk.to_vec())
+        Ok(unpadded_chunk.len())
     }
 }

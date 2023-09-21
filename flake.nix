@@ -1,36 +1,76 @@
 {
   inputs = {
-    # use release 23.05 branch of the GitHub repository as input, this is the most common input format
-    nixpkgs.url = "github:NixOS/nixpkgs/release-23.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    gitignore = {
-      url = "github:hercules-ci/gitignore.nix";
+    crane = {
+      url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
   outputs = {
-    nixpkgs,
+    crane,
     flake-utils,
-    gitignore,
+    nixpkgs,
     ...
   }:
     flake-utils.lib.eachDefaultSystem
     (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        craneLib = crane.lib.${system};
+        pkgs = import nixpkgs {inherit system;};
+
+        bipper = craneLib.buildPackage {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          buildInputs =
+            [
+              # Add additional build inputs here
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # Additional darwin specific inputs can be set here
+              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+              pkgs.libiconv
+            ];
+        };
       in {
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-		    darwin.apple_sdk.frameworks.SystemConfiguration
-			libiconv
-          ];
+        checks = {
+          inherit bipper;
+        };
+
+        packages.default = bipper;
+        packages.bipper = bipper;
+        formatter = pkgs.alejandra;
+        devShells.default = craneLib.devShell {
           packages = with pkgs; [
-            sqlite
-            rust-analyzer
-			diesel-cli
             alejandra
+            cargo
+            cargo-watch
+            clippy
+            deadnix
+            nil
+            rust-analyzer
+            rustc
+            rustfmt
           ];
         };
+
+        # devShells.default = pkgs.mkShell {
+        #   buildInputs = with pkgs; [
+        #     darwin.apple_sdk.frameworks.SystemConfiguration
+        #     libiconv
+        #     SDL2
+        #   ];
+        #   packages = with pkgs; [
+        #     alejandra
+        #     cargo
+        #     cargo-watch
+        #     clippy
+        #     deadnix
+        #     nil
+        #     rust-analyzer
+        #     rustc
+        #     sqlite
+        #   ];
+        # };
       }
     );
 }

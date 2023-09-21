@@ -1,4 +1,6 @@
-use crate::crypto::{calculate_passphrase_hash, DecryptionIter, EncryptionState, DecryptionState, restore_filename};
+use crate::crypto::{
+    calculate_passphrase_hash, restore_filename, DecryptionIter, DecryptionState, EncryptionState,
+};
 use crate::database::Database;
 use axum::body::StreamBody;
 use axum::{
@@ -50,10 +52,8 @@ pub async fn retrieve_handler(
     let storage_path = format!("store/{}", hex::encode(passphrase_hash));
     let filename = restore_filename(&access_info.mnemonic, &metadata)?;
 
-    let decryption_state =
-        DecryptionState::new(&access_info.mnemonic, metadata).await?;
+    let decryption_state = DecryptionState::new(&access_info.mnemonic, metadata).await?;
     let decryption_iter = DecryptionIter::new(&storage_path, decryption_state)?;
-
 
     let body_stream = stream::iter(decryption_iter);
     let body = StreamBody::new(body_stream);
@@ -92,8 +92,4 @@ pub async fn delete_handler(
     state.db.delete_blob(&passphrase_hash).await?;
     fs::remove_file(format!("store/{}", hex::encode(passphrase_hash))).await?;
     Ok("File successfully deleted!")
-}
-
-pub async fn homepage_handler() -> impl IntoResponse {
-    Html(include_str!("index.html"))
 }

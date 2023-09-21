@@ -1,11 +1,9 @@
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::Router;
 use bipper::database::Database;
-use bipper::handlers::{
-    delete_handler, homepage_handler, retrieve_handler, store_handler, AppState,
-};
+use bipper::handlers::{delete_handler, retrieve_handler, store_handler, AppState};
 use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::{env, fs};
@@ -26,7 +24,6 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let state = setup().await?;
     let app = Router::new()
-        .route("/", get(homepage_handler))
         .route("/store/:filename", post(store_handler))
         .route("/retrieve", post(retrieve_handler))
         .route("/delete", post(delete_handler))

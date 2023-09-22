@@ -6,7 +6,7 @@ use axum::body::StreamBody;
 use axum::{
     extract::{BodyStream, Json, Path, State},
     http::{header, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use futures_util::{stream, StreamExt};
 use serde::Deserialize;

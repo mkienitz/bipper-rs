@@ -7,13 +7,21 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
-  outputs = {
+  outputs = inputs @ {
+    self,
     crane,
     flake-utils,
     nixpkgs,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem
+    {
+      nixosModules.bipper = import ./nix/module.nix inputs;
+      nixosModules.default = self.nixosModules.bipper;
+      overlays.default = final: prev: {
+        bipper = self.packages.${prev.pkgs.hostPlatform.system}.bipper;
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem
     (
       system: let
         craneLib = crane.lib.${system};
@@ -40,6 +48,9 @@
         packages.bipper = bipper;
         formatter = pkgs.alejandra;
         devShells.default = craneLib.devShell {
+          buildInputs = [
+            pkgs.SDL2
+          ];
           packages = with pkgs; [
             alejandra
             cargo
@@ -52,25 +63,6 @@
             rustfmt
           ];
         };
-
-        # devShells.default = pkgs.mkShell {
-        #   buildInputs = with pkgs; [
-        #     darwin.apple_sdk.frameworks.SystemConfiguration
-        #     libiconv
-        #     SDL2
-        #   ];
-        #   packages = with pkgs; [
-        #     alejandra
-        #     cargo
-        #     cargo-watch
-        #     clippy
-        #     deadnix
-        #     nil
-        #     rust-analyzer
-        #     rustc
-        #     sqlite
-        #   ];
-        # };
       }
     );
 }

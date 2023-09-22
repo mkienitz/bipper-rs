@@ -26,9 +26,17 @@
       system: let
         craneLib = crane.lib.${system};
         pkgs = import nixpkgs {inherit system;};
+        migrationsFilter = path: _type: builtins.match ".*/migrations/.*$" path != null;
+        cargoFilter = craneLib.filterCargoSources;
+        srcFilter = path: type: builtins.any (f: f path type) [cargoFilter migrationsFilter];
+        src = nixpkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = srcFilter;
+        };
 
         bipper = craneLib.buildPackage {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          inherit src;
+          # src = craneLib.cleanCargoSource (craneLib.path ./.);
           buildInputs =
             [
               # Add additional build inputs here
@@ -44,10 +52,13 @@
           inherit bipper;
         };
 
+        nixosTests.bipper = import ./nix/tests.nix {inherit pkgs self;};
+
         packages.default = bipper;
         packages.bipper = bipper;
         formatter = pkgs.alejandra;
         devShells.default = craneLib.devShell {
+          inputsFrom = [bipper];
           buildInputs = [
             pkgs.SDL2
           ];

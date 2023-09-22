@@ -5,7 +5,9 @@ use axum::Router;
 use bipper::database::Database;
 use bipper::handlers::{delete_handler, retrieve_handler, store_handler, AppState};
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::{env, fs};
+use tracing::info;
 
 async fn setup() -> Result<AppState> {
     let db_password = env::var("BIPPER_POSTGRES_PASSWORD");
@@ -14,13 +16,18 @@ async fn setup() -> Result<AppState> {
     let db_user = env::var("BIPPER_POSTGRES_USER");
     let db_database = env::var("BIPPER_POSTGRES_DATABASE");
 
+    info!(?db_host, ?db_port, ?db_user, ?db_database);
+
     let user_pass = match db_password {
         Ok(pass) => format!("{}:{}", db_user?, pass),
         Err(_) => db_user?,
     };
 
-    let database_url = if db_host.starts_with("/") {
-        format!("postgres://{}@{}/{}", user_pass, db_host, db_database?)
+    let database_url = if db_host.starts_with('/') {
+        format!(
+            "postgres://{}@localhost/{}?host={}",
+            user_pass, db_database?, db_host
+        )
     } else {
         format!(
             "postgres://{}@{}:{}/{}",
@@ -46,7 +53,9 @@ async fn main() -> Result<()> {
         .route("/delete", post(delete_handler))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(state);
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
+    let bipper_addr = env::var("BIPPER_ADDRESS")?;
+    let bipper_port = env::var("BIPPER_PORT")?;
+    let addr = SocketAddr::from_str(&format!("{}:{}", bipper_addr, bipper_port))?;
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())

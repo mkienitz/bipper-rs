@@ -81,10 +81,6 @@ in {
       serviceConfig = {
         ExecStart = pkgs.writeShellScript "bipper-start" ''
           set -euo pipefail
-          export BIPPER_POSTGRES_HOST
-          export BIPPER_POSTGRES_USER
-          export BIPPER_POSTGRES_DATABASE
-          export BIPPER_POSTGRES_PORT
           ${optionalString (!hasPrefix "/" cfg.postgres.host) "export BIPPER_POSTGRES_PASSWORD=$(< ${cfg.postgres.passwordFile})"}
           exec ${cfg.package}/bin/bipper
         '';
@@ -102,8 +98,10 @@ in {
           BIPPER_POSTGRES_HOST = cfg.postgres.host;
           BIPPER_POSTGRES_USER = cfg.postgres.username;
           BIPPER_POSTGRES_DATABASE = cfg.postgres.database;
+          BIPPER_ADDRESS = cfg.address;
+          BIPPER_PORT = toString cfg.port;
         }
-        // optionalAttrs (hasPrefix "/" cfg.postgres.host) {
+        // optionalAttrs (!hasPrefix "/" cfg.postgres.host) {
           BIPPER_POSTGRES_PORT = toString cfg.postgres.port;
         };
     };

@@ -76,7 +76,7 @@ in {
     ];
     systemd.services.bipper = {
       description = "Bipper";
-      after = ["network.target"];
+      after = ["network.target" "postgresql.service"];
       wantedBy = ["multi-user.target"];
       serviceConfig = {
         ExecStart = pkgs.writeShellScript "bipper-start" ''

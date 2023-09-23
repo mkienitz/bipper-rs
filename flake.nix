@@ -18,7 +18,7 @@
       nixosModules.bipper = import ./nix/module.nix inputs;
       nixosModules.default = self.nixosModules.bipper;
       overlays.default = final: prev: {
-        bipper = self.packages.${prev.pkgs.hostPlatform.system}.bipper;
+        bipper = self.packages.${prev.stdenv.hostPlatform.system}.bipper;
       };
     }
     // flake-utils.lib.eachDefaultSystem

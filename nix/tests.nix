@@ -44,8 +44,7 @@
       testData = size: ''
         machine.succeed("head -c ${size} /dev/urandom > /tmp/data-${size}")
         machine.succeed("curl --fail --location 'http://localhost:3939/store/data-${size}' --header 'Content-Type: application/octet-stream' --data '@/tmp/data-${size}' > /tmp/passphrase-${size}")
-        machine.succeed("head -c ${size} /dev/urandom > /tmp/data-${size}")
-        machine.succeed("curl --fail --location 'http://localhost/retrieve' --header 'Content-Type: application/json' --data '{\"mnemonic\": \"$(< /tmp/passphrase-${size})\"}' > /tmp/retrieved-${size}")
+        machine.succeed("curl --fail --location 'http://localhost:3939/retrieve' --header 'Content-Type: application/json' --data '{\"mnemonic\": \"'\"$(< /tmp/passphrase-${size})\"'\"}' > /tmp/retrieved-${size}")
         machine.succeed("diff -q /tmp/data-${size} /tmp/retrieved-${size}")
       '';
     in ''

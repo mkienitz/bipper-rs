@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use axum::extract::DefaultBodyLimit;
 use axum::routing::post;
 use axum::Router;
@@ -7,32 +7,26 @@ use bipper::handlers::{delete_handler, retrieve_handler, store_handler, AppState
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{env, fs};
+use dotenv::dotenv;
 use tracing::info;
 
 async fn setup() -> Result<AppState> {
-    let db_password = env::var("BIPPER_POSTGRES_PASSWORD");
-    let db_host = env::var("BIPPER_POSTGRES_HOST")?;
+    dotenv().ok();
+    let db_host = env::var("BIPPER_POSTGRES_HOST");
     let db_port = env::var("BIPPER_POSTGRES_PORT");
     let db_user = env::var("BIPPER_POSTGRES_USER");
     let db_database = env::var("BIPPER_POSTGRES_DATABASE");
+    let db_password = env::var("BIPPER_POSTGRES_PASSWORD");
+    info!(?db_host, ?db_port, ?db_user, ?db_database, ?db_password);
 
-    info!(?db_host, ?db_port, ?db_user, ?db_database);
-
-    let user_pass = match db_password {
-        Ok(pass) => format!("{}:{}", db_user?, pass),
-        Err(_) => db_user?,
-    };
-
-    let database_url = if db_host.starts_with('/') {
-        format!(
-            "postgres://{}@localhost/{}?host={}",
-            user_pass, db_database?, db_host
-        )
-    } else {
-        format!(
-            "postgres://{}@{}:{}/{}",
-            user_pass, db_host, db_port?, db_database?
-        )
+    let database_url = match (db_host, db_port, db_user, db_database, db_password) {
+        (Ok(host), Ok(port), Ok(user), Ok(db), Ok(pass)) => {
+            format!("postgres://{}:{}@{}:{}/{}", user, pass, host, port, db)
+        }
+        (Ok(host), Err(_), Ok(user), Ok(db), Err(_)) => {
+            format!("postgres://{}@localhost/{}?host={}", user, db, host)
+        }
+        _ => return Err(Error::msg("Invalid environment!")),
     };
 
     let state = AppState {

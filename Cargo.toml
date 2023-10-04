@@ -11,6 +11,7 @@ anyhow = "1.0.75"
 axum = { version = "0.6.20", features = ["headers"] }
 bip39 = "2.0.0"
 cbc = { version = "0.1.2", features = ["alloc"] }
+dotenv = "0.15.0"
 futures-util = "0.3.28"
 generic-array = "1.0.0"
 hex = "0.4.3"

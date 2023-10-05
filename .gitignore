@@ -1,4 +1,6 @@
-/target
-.direnv
-store
-.env
+/.direnv
+/.env
+/.idea
+/result
+/store/
+/target/

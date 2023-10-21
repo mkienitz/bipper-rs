@@ -6,11 +6,16 @@
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    devshell = {
+      url = "github:numtide/devshell";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs = inputs @ {
     self,
     crane,
     flake-utils,
+    devshell,
     nixpkgs,
     ...
   }:
@@ -24,8 +29,15 @@
     // flake-utils.lib.eachDefaultSystem
     (
       system: let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            devshell.overlays.default
+          ];
+        };
+
+        # Crane build
         craneLib = crane.lib.${system};
-        pkgs = import nixpkgs {inherit system;};
         migrationsFilter = path: _type: builtins.match ".*/migrations/.*$" path != null;
         cargoFilter = craneLib.filterCargoSources;
         srcFilter = path: type: builtins.any (f: f path type) [cargoFilter migrationsFilter];
@@ -34,7 +46,7 @@
           filter = srcFilter;
         };
 
-        bipper = craneLib.buildPackage {
+        commonArgs = {
           inherit src;
           # src = craneLib.cleanCargoSource (craneLib.path ./.);
           buildInputs =
@@ -44,10 +56,14 @@
             ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               # Additional darwin specific inputs can be set here
               pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+              pkgs.darwin.apple_sdk.frameworks.CoreFoundation
               pkgs.libiconv
             ];
         };
+
+        bipper = craneLib.buildPackage commonArgs;
       in {
+        # nix flake check
         checks = {
           inherit bipper;
         };
@@ -55,24 +71,24 @@
         nixosTests.bipper = import ./nix/tests.nix {inherit pkgs self;};
 
         packages.default = bipper;
-        packages.bipper = bipper;
+
+        packages.bipper-docker = pkgs.dockerTools.buildLayeredImage {
+          name = "bipper";
+          config.Cmd = ["${bipper}/bin/bipper"];
+        };
+
         formatter = pkgs.alejandra;
-        devShells.default = craneLib.devShell {
-          inputsFrom = [bipper];
-          buildInputs = [
-            pkgs.SDL2
+
+        devShells.default = pkgs.devshell.mkShell {
+          imports = [
+            "${devshell}/extra/language/rust.nix"
+            "${devshell}/extra/language/c.nix"
           ];
-          packages = with pkgs; [
-            alejandra
-            cargo
-            cargo-watch
-            clippy
-            deadnix
-            nil
-            rust-analyzer
-            rustc
-            rustfmt
-          ];
+          packages = with pkgs;
+            [
+              rust-analyzer
+            ]
+            ++ commonArgs.buildInputs;
         };
       }
     );

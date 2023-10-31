@@ -24,32 +24,30 @@ impl Database {
     pub async fn insert_blob(&self, metadata: &BlobMetadata) -> Result<()> {
         sqlx::query(
             r#"INSERT INTO blobs
-                    (passphrase_hash, filename, content_nonce, filename_nonce, cipher_hash)
-                    VALUES ($1, $2, $3, $4, $5)"#,
+                    (entropy_hash, filename_cipher, filename_nonce)
+                    VALUES ($1, $2, $3)"#,
         )
-        .bind(&metadata.passphrase_hash)
-        .bind(&metadata.filename)
-        .bind(&metadata.content_nonce)
-        .bind(&metadata.filename_nonce)
-        .bind(&metadata.cipher_hash)
+        .bind(&metadata.entropy_hash)
+        .bind(&metadata.filename_cipher)
+        .bind(metadata.filename_nonce)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    pub async fn find_blob(&self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
+    pub async fn find_blob(&self, entropy_hash: &String) -> Result<BlobMetadata> {
         let metadata =
-            sqlx::query_as::<_, BlobMetadata>(r#"SELECT * FROM blobs WHERE passphrase_hash = $1"#)
-                .bind(passphrase_hash)
+            sqlx::query_as::<_, BlobMetadata>(r#"SELECT * FROM blobs WHERE entropy_hash = $1"#)
+                .bind(entropy_hash)
                 .fetch_one(&self.pool)
                 .await?;
         Ok(metadata)
     }
-    pub async fn delete_blob(&self, passphrase_hash: &Vec<u8>) -> Result<BlobMetadata> {
+    pub async fn delete_blob(&self, entropy_hash: &String) -> Result<BlobMetadata> {
         let metadata = sqlx::query_as::<_, BlobMetadata>(
-            r#"DELETE FROM blobs WHERE passphrase_hash = $1 RETURNING *"#,
+            r#"DELETE FROM blobs WHERE entropy_hash = $1 RETURNING *"#,
         )
-        .bind(passphrase_hash)
+        .bind(entropy_hash)
         .fetch_one(&self.pool)
         .await?;
         Ok(metadata)

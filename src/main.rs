@@ -4,10 +4,10 @@ use axum::routing::post;
 use axum::Router;
 use bipper::database::Database;
 use bipper::handlers::{delete_handler, retrieve_handler, store_handler, AppState};
+use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{env, fs};
-use dotenv::dotenv;
 use tracing::info;
 
 async fn setup() -> Result<AppState> {

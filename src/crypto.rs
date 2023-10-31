@@ -1,161 +1,139 @@
 use crate::models::BlobMetadata;
-use aes::cipher::{
-    block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, BlockSizeUser, IvSizeUser, KeyIvInit,
-    KeySizeUser,
-};
 use anyhow::{anyhow, Result};
-use generic_array::typenum::Unsigned;
 use rand::rngs::OsRng;
 use rand::Rng;
-use scrypt::scrypt;
+use ring::aead::{
+    Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM, NONCE_LEN,
+};
+
+use ring::digest::{digest, SHA256};
+
 use std::{format, fs, io::Read, path::Path, str::FromStr};
 use tokio::{
     fs::{File, OpenOptions},
     io::AsyncWriteExt,
 };
 
-pub fn derive_key(entropy: &[u8], tag: &str) -> Result<Vec<u8>> {
-    let mut tagged_entropy = entropy.to_vec();
-    tagged_entropy.append(&mut tag.as_bytes().to_vec());
-    let mut key_buffer = [0u8; KEY_SIZE];
-    let params = scrypt::Params::new(15, 8, 1, KEY_SIZE).map_err(|e| anyhow!(e))?;
-    // This is perfectly fine
-    let pepper = [0x46u8, 0xee, 0x5f, 0x18, 0x2c, 0xb8, 0x6d, 0x60];
-    scrypt(&tagged_entropy, &pepper, &params, &mut key_buffer).map_err(|e| anyhow!(e))?;
-    Ok(key_buffer.to_vec())
+fn entropy_to_key(entropy: &[u8; 32]) -> Result<UnboundKey> {
+    UnboundKey::new(&AES_256_GCM, entropy).map_err(|e| anyhow!(e))
 }
 
-pub async fn calculate_passphrase_hash(mnemonic: &str) -> Result<Vec<u8>> {
+fn mnemonic_to_key(mnemonic: &str) -> Result<UnboundKey> {
     let entropy = bip39::Mnemonic::from_str(mnemonic)?.to_entropy();
-    derive_key(&entropy, "passphrase")
+    entropy_to_key(entropy.as_slice().try_into()?)
 }
 
-pub fn restore_filename(mnemonic: &str, metadata: &BlobMetadata) -> Result<String> {
+pub fn mnemonic_to_hash(mnemonic: &str) -> Result<String> {
     let entropy = bip39::Mnemonic::from_str(mnemonic)?.to_entropy();
-    let filename_key = derive_key(&entropy, "filename")?;
-    let filename_decryptor = Aes256CbcDec::new(
-        filename_key.as_slice().into(),
-        metadata.filename_nonce.as_slice().into(),
+    Ok(hex::encode(digest(&SHA256, &entropy)))
+}
+
+pub fn restore_filename(
+    mnemonic: &str,
+    mut filename_cipher: Vec<u8>,
+    filename_nonce: [u8; NONCE_LEN],
+) -> Result<String> {
+    let mut filename_key = OpeningKey::new(
+        mnemonic_to_key(mnemonic)?,
+        SimpleNonceSequence(filename_nonce),
     );
-
-    Ok(String::from_utf8(
-        filename_decryptor
-            .decrypt_padded_vec_mut::<Pkcs7>(&metadata.filename)
-            .map_err(|e| anyhow!(e))?,
-    )?)
+    match filename_key.open_in_place(Aad::empty(), filename_cipher.as_mut()) {
+        Ok(plaintext) => Ok(String::from_utf8(plaintext.to_vec())?),
+        Err(e) => Err(anyhow!("Failed to decrypt filename: {}", e)),
+    }
 }
 
-type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
-type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
-const BLOCK_SIZE: usize = <Aes256CbcEnc as BlockSizeUser>::BlockSize::USIZE;
-const NONCE_SIZE: usize = <Aes256CbcEnc as IvSizeUser>::IvSize::USIZE;
-const KEY_SIZE: usize = <Aes256CbcEnc as KeySizeUser>::KeySize::USIZE;
+fn get_random_nonce() -> [u8; NONCE_LEN] {
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    OsRng.fill(&mut nonce_bytes);
+    nonce_bytes
+}
 
-pub struct EncryptionState {
-    encryptor: Aes256CbcEnc,
+struct SimpleNonceSequence([u8; NONCE_LEN]);
+
+impl NonceSequence for SimpleNonceSequence {
+    fn advance(&mut self) -> std::result::Result<Nonce, ring::error::Unspecified> {
+        Ok(Nonce::assume_unique_for_key(self.0))
+    }
+}
+
+pub struct Encryptor {
     file: File,
-    file_path: Box<Path>,
-    buffer: Vec<u8>,
-    mnemonic: bip39::Mnemonic,
+    // mnemonic: bip39::Mnemonic,
+    entropy: [u8; 32],
     metadata: BlobMetadata,
 }
 
-impl EncryptionState {
+impl Encryptor {
     pub async fn new(filename: &str) -> Result<Self> {
         // Create entropy and nonces
         let mut entropy = [0u8; 32];
-        let mut filename_nonce = [0u8; NONCE_SIZE];
-        let mut content_nonce = [0u8; NONCE_SIZE];
         OsRng.fill(&mut entropy);
-        OsRng.fill(&mut filename_nonce);
-        OsRng.fill(&mut content_nonce);
+        let filename_nonce_bytes = get_random_nonce();
 
-        // Derive keys and create nonces
-        let passphrase_hash = derive_key(&entropy, "passphrase")?;
-        let content_key = derive_key(&entropy, "content")?;
-        let filename_key = derive_key(&entropy, "filename")?;
+        // Digest passphrase entropy to be used as DB key and filename
+        // let entropy_hash = digest(&SHA256, &entropy).as_ref().try_into()?;
+        let entropy_hash = hex::encode(digest(&SHA256, &entropy));
 
-        // Setup cipher and encrypt filename
-        let filename_encryptor = Aes256CbcEnc::new(
-            filename_key.as_slice().into(),
-            filename_nonce.as_ref().into(),
-        );
-        let filename_bytes =
-            filename_encryptor.encrypt_padded_vec_mut::<Pkcs7>(filename.as_bytes());
-
-        // Setup encryptor
-        let encryptor =
-            Aes256CbcEnc::new(content_key.as_slice().into(), content_nonce.as_ref().into());
+        // Encrypt filename
+        let filename_nonce_seq = SimpleNonceSequence(filename_nonce_bytes);
+        let mut filename_key = SealingKey::new(entropy_to_key(&entropy)?, filename_nonce_seq);
+        let mut filename_bytes = filename.to_string().into_bytes();
+        filename_key
+            .seal_in_place_append_tag(Aad::empty(), &mut filename_bytes)
+            .map_err(anyhow::Error::msg)?;
 
         // Open file
-        let str_path = format!("store/{}", hex::encode(passphrase_hash.clone()));
-        let file_path = Path::new(&str_path);
+        let path_str = format!("store/{}", entropy_hash);
+        let file_path = Path::new(&path_str);
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(file_path)
             .await?;
 
-        Ok(EncryptionState {
-            encryptor,
+        Ok(Encryptor {
             file,
-            file_path: file_path.into(),
-            buffer: Vec::new(),
-            mnemonic: bip39::Mnemonic::from_entropy(&entropy)?,
+            // mnemonic: bip39::Mnemonic::from_entropy(&entropy)?,
+            entropy,
             metadata: BlobMetadata {
-                passphrase_hash: passphrase_hash.to_vec(),
-                filename: filename_bytes,
-                content_nonce: content_nonce.to_vec(),
-                filename_nonce: filename_nonce.to_vec(),
-                cipher_hash: "".to_string(),
+                entropy_hash,
+                filename_cipher: filename_bytes,
+                filename_nonce: filename_nonce_bytes,
             },
         })
     }
 
     pub async fn update(&mut self, chunk: &[u8]) -> Result<()> {
-        self.buffer.extend_from_slice(chunk);
-        let chunks = self.buffer.chunks_exact_mut(Aes256CbcEnc::block_size());
-        for chunk in chunks {
-            self.encryptor.encrypt_block_mut(chunk.into());
-        }
-        let superblock_size = self.buffer.len() - self.buffer.len() % BLOCK_SIZE;
-        let drained = self.buffer.drain(..superblock_size);
-        self.file.write_all(drained.as_ref()).await?;
+        let mut chunk_vec = chunk.to_vec();
+        let nonce = get_random_nonce();
+        let mut key = SealingKey::new(entropy_to_key(&self.entropy)?, SimpleNonceSequence(nonce));
+        // NOTE: assuming appending is faster than two IO calls
+        key.seal_in_place_append_tag(Aad::empty(), &mut chunk_vec)
+            .map_err(anyhow::Error::msg)?;
+        let mut finished_chunk = (chunk_vec.len() as u64).to_be_bytes().to_vec();
+        finished_chunk.append(nonce.to_vec().as_mut());
+        finished_chunk.append(chunk_vec.as_mut());
+        self.file.write_all(finished_chunk.as_ref()).await?;
         Ok(())
     }
 
-    pub async fn finalize(mut self) -> Result<(String, BlobMetadata)> {
-        let mut rem_buf = [0u8; BLOCK_SIZE];
-        self.encryptor
-            .encrypt_padded_b2b_mut::<Pkcs7>(&self.buffer, &mut rem_buf)
-            .map_err(|e| anyhow!(e))?;
-        self.file.write_all(&rem_buf).await?;
-        self.metadata.cipher_hash = sha256::try_digest(self.file_path)?;
-        Ok((self.mnemonic.to_string(), self.metadata))
+    pub async fn finalize(self) -> Result<(String, BlobMetadata)> {
+        let mnemonic = bip39::Mnemonic::from_entropy(&self.entropy)?.to_string();
+        Ok((mnemonic, self.metadata))
     }
 }
 
-const DECRYPTION_BUFSIZE: usize = 32;
 pub struct DecryptionIter {
     file: fs::File,
-    buffer: Box<[u8; DECRYPTION_BUFSIZE]>,
-    buf_used: usize,
-    decryption_state: DecryptionState,
-    remaining_length: u64,
+    entropy: [u8; 32],
 }
 
 impl DecryptionIter {
-    pub fn new(filename: &str, decryption_state: DecryptionState) -> Result<Self> {
+    pub fn new(filename: &str, mnemonic: &str) -> Result<Self> {
         let file = fs::OpenOptions::new().read(true).open(filename)?;
-        let remaining_length = file.metadata()?.len();
-
-        Ok(DecryptionIter {
-            file,
-            decryption_state,
-            buffer: Box::new([0u8; DECRYPTION_BUFSIZE]),
-            buf_used: 0,
-            remaining_length,
-        })
+        let entropy = bip39::Mnemonic::from_str(mnemonic)?.to_entropy()[..32].try_into()?;
+        Ok(Self { file, entropy })
     }
 }
 
@@ -163,82 +141,35 @@ impl Iterator for DecryptionIter {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.file.read(&mut self.buffer[self.buf_used..]) {
-            Ok(0) => None,
-            Ok(bytes_read) => {
-                let curr_size = bytes_read + self.buf_used;
-                // Check if this is the last call to next()
-                if curr_size == self.remaining_length as usize {
-                    // Last block of file is in our buffer
-                    if curr_size > BLOCK_SIZE {
-                        // We also have unpadded blocks
-                        self.decryption_state
-                            .update(&mut self.buffer[..curr_size - BLOCK_SIZE]);
-                    }
-                    // Also works if there were no unpadded blocks
-                    let last_block_size = match self
-                        .decryption_state
-                        .finalize(&mut self.buffer[curr_size - BLOCK_SIZE..curr_size])
-                    {
-                        Ok(slice) => slice,
-                        Err(e) => {
-                            return Some(Err(anyhow!(e)));
-                        }
-                    };
-                    Some(Ok(
-                        self.buffer[..curr_size - BLOCK_SIZE + last_block_size].to_vec()
-                    ))
-                } else {
-                    // Only unpadded blocks, more to come
-                    let superblock_size = curr_size - curr_size % BLOCK_SIZE;
-                    self.decryption_state
-                        .update(&mut self.buffer[..superblock_size]);
-                    self.buf_used = curr_size - superblock_size;
-                    self.remaining_length -= superblock_size as u64;
-                    self.buffer.copy_within(superblock_size..curr_size, 0);
-                    // debug!("Enjoy Partial {superblock_size}");
-                    Some(Ok(self.buffer[..superblock_size].to_vec()))
-                }
-            }
-            Err(e) => {
-                panic!("{e}")
-            }
+        // Try to read length field
+        let mut length_bytes = [0u8; 8];
+        if self.file.read_exact(&mut length_bytes).is_err() {
+            // Signal that we are done
+            return None;
         }
-    }
-}
 
-pub struct DecryptionState {
-    decryptor: Aes256CbcDec,
-}
-
-impl DecryptionState {
-    pub async fn new(mnemonic_str: &str, metadata: BlobMetadata) -> Result<Self> {
-        let entropy = bip39::Mnemonic::from_str(mnemonic_str)?.to_entropy();
-        let content_key = derive_key(&entropy, "content")?;
-
-        let decryptor = Aes256CbcDec::new(
-            content_key.as_slice().into(),
-            metadata.content_nonce.as_slice().into(),
-        );
-
-        Ok(DecryptionState { decryptor })
-    }
-
-    pub fn update(&mut self, blocks: &mut [u8]) {
-        assert!(blocks.len() % BLOCK_SIZE == 0);
-        let chunks = blocks.chunks_exact_mut(BLOCK_SIZE);
-        for chunk in chunks {
-            self.decryptor.decrypt_block_mut(chunk.into());
+        // Try to extract nonce bytes
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        if let Err(e) = self.file.read_exact(&mut nonce_bytes) {
+            return Some(Err(anyhow!("Could not read nonce bytes: {}", e)));
         }
-    }
 
-    pub fn finalize(&mut self, padded_chunk: &mut [u8]) -> Result<usize> {
-        let dc = self.decryptor.clone();
-        let unpadded_chunk = match dc.decrypt_padded_mut::<Pkcs7>(padded_chunk) {
-            Ok(slice) => slice,
-            Err(e) => return Err(anyhow!(e)),
+        // Try to read ciphertext
+        let length = match u64::from_be_bytes(length_bytes).try_into() {
+            Ok(l) => l,
+            Err(e) => return Some(Err(anyhow!("Could not decode length: {}", e))),
         };
-        // Ok(unpadded_chunk.to_vec())
-        Ok(unpadded_chunk.len())
+
+        let mut chunk = vec![0; length];
+        match self.file.read_exact(&mut chunk) {
+            Ok(()) => {
+                let nonce = SimpleNonceSequence(nonce_bytes);
+                let unbound_key = entropy_to_key(&self.entropy).ok()?;
+                let mut key = OpeningKey::new(unbound_key, nonce);
+                let plain = key.open_in_place(Aad::empty(), &mut chunk).ok()?;
+                Some(Ok(plain.to_vec()))
+            }
+            Err(e) => Some(Err(e.into())),
+        }
     }
 }

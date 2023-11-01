@@ -18,7 +18,14 @@ impl Database {
     }
 
     pub async fn create_tables(&self) -> Result<()> {
-        Ok(sqlx::migrate!("./migrations").run(&self.pool).await?)
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS blobs (
+                entropy_hash VARCHAR(255) NOT NULL PRIMARY KEY,
+                filename_cipher BYTEA NOT NULL,
+                filename_nonce BYTEA NOT NULL
+            )"#
+        ).execute(&self.pool).await?;
+        Ok(())
     }
 
     pub async fn insert_blob(&self, metadata: &BlobMetadata) -> Result<()> {

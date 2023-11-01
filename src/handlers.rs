@@ -34,11 +34,10 @@ pub async fn retrieve_handler(
     )?;
 
     let storage_path = format!("store/{}", entropy_hash);
-    debug!(storage_path);
     let decryption_iter = DecryptionIter::new(&storage_path, &access_info.mnemonic)?;
 
-    let body_stream = stream::iter(decryption_iter);
-    let body = StreamBody::new(body_stream);
+    let decryption_stream = stream::iter(decryption_iter);
+    let stream_body = StreamBody::new(decryption_stream);
 
     let headers = [
         (header::CONTENT_TYPE, "application/octet-stream".to_string()),
@@ -48,7 +47,7 @@ pub async fn retrieve_handler(
         ),
     ];
 
-    Ok((headers, body))
+    Ok((headers, stream_body))
 }
 
 pub async fn store_handler(
@@ -56,14 +55,13 @@ pub async fn store_handler(
     Path(filename): Path<String>,
     mut stream: BodyStream,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut enc_state = Encryptor::new(&filename).await?;
+    let mut encryptor = Encryptor::new(&filename).await?;
     while let Some(chunk) = stream.next().await {
-        enc_state.update(&chunk?).await?;
+        encryptor.update(&chunk?).await?;
     }
-    let (mnemonic, metadata) = enc_state.finalize().await?;
+    let (mnemonic, metadata) = encryptor.finalize().await?;
     state.db.insert_blob(&metadata).await?;
-    let headers = [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")];
-    Ok((headers, mnemonic))
+    Ok(mnemonic)
 }
 
 pub async fn delete_handler(

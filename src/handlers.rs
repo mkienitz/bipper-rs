@@ -4,27 +4,16 @@ use crate::errors::AppError;
 use axum::body::StreamBody;
 use axum::{
     extract::{BodyStream, Json, Path, State},
-    http::{header, StatusCode},
-    response::{IntoResponse, Response},
+    http::header,
+    response::IntoResponse,
 };
 use futures_util::{stream, StreamExt};
 use serde::Deserialize;
 use tokio::fs;
-use tracing::debug;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
-    }
 }
 
 #[derive(Deserialize)]

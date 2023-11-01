@@ -10,12 +10,17 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs = inputs @ {
     self,
     crane,
-    flake-utils,
     devshell,
+    fenix,
+    flake-utils,
     nixpkgs,
     ...
   }:
@@ -33,11 +38,18 @@
           inherit system;
           overlays = [
             devshell.overlays.default
+            fenix.overlays.default
           ];
         };
-
         # Crane build
-        craneLib = crane.lib.${system};
+        rustToolchain = pkgs.fenix.complete.withComponents [
+          "cargo"
+          "clippy"
+          "rustfmt"
+          "rust-src"
+          "rustc"
+        ];
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
         migrationsFilter = path: _type: builtins.match ".*/migrations/.*$" path != null;
         cargoFilter = craneLib.filterCargoSources;
         srcFilter = path: type: builtins.any (f: f path type) [cargoFilter migrationsFilter];
@@ -45,10 +57,8 @@
           src = ./.;
           filter = srcFilter;
         };
-
         commonArgs = {
           inherit src;
-          # src = craneLib.cleanCargoSource (craneLib.path ./.);
           buildInputs =
             [
               # Add additional build inputs here
@@ -58,37 +68,43 @@
               pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
               pkgs.darwin.apple_sdk.frameworks.CoreFoundation
               pkgs.libiconv
+              # pkgs.SDL2
             ];
         };
-
         bipper = craneLib.buildPackage commonArgs;
+        # fpkgs = fenix.packages.${system};
       in {
         # nix flake check
         checks = {
           inherit bipper;
         };
-
         nixosTests.bipper = import ./nix/tests.nix {inherit pkgs self;};
-
         packages.default = bipper;
-
         packages.bipper-docker = pkgs.dockerTools.buildLayeredImage {
           name = "bipper";
           config.Cmd = ["${bipper}/bin/bipper"];
         };
-
         formatter = pkgs.alejandra;
-
         devShells.default = pkgs.devshell.mkShell {
+          language.rust.enableDefaultToolchain = false;
           imports = [
             "${devshell}/extra/language/rust.nix"
             "${devshell}/extra/language/c.nix"
           ];
           packages = with pkgs;
             [
+              nil
+              rustToolchain
               rust-analyzer
             ]
             ++ commonArgs.buildInputs;
+          env = [
+            {
+              name = "RUST_SRC_PATH";
+              value = "${rustToolchain}/lib/rustlib/src/rust/library";
+              # value = "/Users/max/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library";
+            }
+          ];
         };
       }
     );

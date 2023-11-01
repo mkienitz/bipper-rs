@@ -8,7 +8,7 @@ use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{env, fs};
-use tracing::info;
+use tracing::{debug, info};
 
 async fn setup() -> Result<AppState> {
     dotenv().ok();
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     let bipper_addr = env::var("BIPPER_ADDRESS")?;
     let bipper_port = env::var("BIPPER_PORT")?;
     let addr = SocketAddr::from_str(&format!("{}:{}", bipper_addr, bipper_port))?;
-    tracing::debug!("listening on {}", addr);
+    debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await

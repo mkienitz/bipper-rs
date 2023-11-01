@@ -23,8 +23,10 @@ impl Database {
                 entropy_hash VARCHAR(255) NOT NULL PRIMARY KEY,
                 filename_cipher BYTEA NOT NULL,
                 filename_nonce BYTEA NOT NULL
-            )"#
-        ).execute(&self.pool).await?;
+            )"#,
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

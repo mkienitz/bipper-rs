@@ -8,6 +8,7 @@ use dotenv::dotenv;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{env, fs};
+use tokio::net::TcpListener;
 use tracing::{debug, info};
 
 async fn setup() -> Result<AppState> {
@@ -28,6 +29,7 @@ async fn setup() -> Result<AppState> {
         }
         _ => return Err(Error::msg("Invalid environment!")),
     };
+    info!(database_url);
 
     let state = AppState {
         db: Database::new(&database_url).await?,
@@ -41,19 +43,19 @@ async fn setup() -> Result<AppState> {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let state = setup().await?;
-    let app = Router::new()
+    let router = Router::new()
         .route("/store/:filename", post(store_handler))
         .route("/retrieve", post(retrieve_handler))
         .route("/delete", post(delete_handler))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(state);
+
     let bipper_addr = env::var("BIPPER_ADDRESS")?;
     let bipper_port = env::var("BIPPER_PORT")?;
     let addr = SocketAddr::from_str(&format!("{}:{}", bipper_addr, bipper_port))?;
+    let listener = TcpListener::bind(addr).await?;
+
     debug!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(listener, router).await?;
     Ok(())
 }

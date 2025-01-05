@@ -1,9 +1,9 @@
 use crate::crypto::{mnemonic_to_hash, restore_filename, DecryptionIter, Encryptor};
 use crate::database::Database;
 use crate::errors::AppError;
-use axum::body::StreamBody;
+use axum::body::Body;
 use axum::{
-    extract::{BodyStream, Json, Path, State},
+    extract::{Json, Path, State},
     http::header,
     response::IntoResponse,
 };
@@ -37,7 +37,7 @@ pub async fn retrieve_handler(
     let decryption_iter = DecryptionIter::new(&storage_path, &access_info.mnemonic)?;
 
     let decryption_stream = stream::iter(decryption_iter);
-    let stream_body = StreamBody::new(decryption_stream);
+    let stream_body = Body::from_stream(decryption_stream);
 
     let headers = [
         (header::CONTENT_TYPE, "application/octet-stream".to_string()),
@@ -53,9 +53,10 @@ pub async fn retrieve_handler(
 pub async fn store_handler(
     State(state): State<AppState>,
     Path(filename): Path<String>,
-    mut stream: BodyStream,
+    body: Body,
 ) -> Result<impl IntoResponse, AppError> {
     let mut encryptor = Encryptor::new(&filename).await?;
+    let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
         encryptor.update(&chunk?).await?;
     }

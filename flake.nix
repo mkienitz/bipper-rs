@@ -82,7 +82,7 @@
 
           packages.default = crateOutput.packages.release;
 
-          overlayAttrs.coffee-labeler = config.packages.default;
+          overlayAttrs.bipper = config.packages.default;
         };
 
       flake =

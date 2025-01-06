@@ -3,7 +3,7 @@ use crate::database::Database;
 use crate::errors::AppError;
 use axum::body::Body;
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Multipart, Path, State},
     http::header,
     response::IntoResponse,
 };
@@ -43,7 +43,7 @@ pub async fn retrieve_handler(
         (header::CONTENT_TYPE, "application/octet-stream".to_string()),
         (
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename={}", filename),
+            format!("attachment; filename=\"{}\"", filename),
         ),
     ];
 
@@ -53,12 +53,11 @@ pub async fn retrieve_handler(
 pub async fn store_handler(
     State(state): State<AppState>,
     Path(filename): Path<String>,
-    body: Body,
+    mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let mut encryptor = Encryptor::new(&filename).await?;
-    let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
-        encryptor.update(&chunk?).await?;
+    while let Some(field) = multipart.next_field().await? {
+        encryptor.update(&field.bytes().await?).await?;
     }
     let (mnemonic, metadata) = encryptor.finalize().await?;
     state.db.insert_blob(&metadata).await?;

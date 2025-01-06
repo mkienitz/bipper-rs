@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
-axum = { version = "0.7.5" }
+axum = { version = "0.7.5", features = [ "multipart"] }
 bip39 = "2.0.0"
 dotenv = "0.15.0"
 futures-util = "0.3.28"

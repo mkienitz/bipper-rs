@@ -42,6 +42,7 @@
         {
           pkgs,
           config,
+          lib,
           ...
         }:
         let
@@ -51,9 +52,19 @@
         in
         {
           devshells.default = {
-            packages = [
-              pkgs.nil
-              pkgs.rust-analyzer
+            packages =
+              [
+                pkgs.nil
+                pkgs.rust-analyzer
+              ]
+              ++ lib.optionals pkgs.stdenv.isDarwin [
+                pkgs.libiconv
+              ];
+            env = [
+              {
+                name = "LIBRARY_PATH";
+                eval = "$DEVSHELL_DIR/lib";
+              }
             ];
             devshell.startup.pre-commit.text = config.pre-commit.installationScript;
           };
@@ -76,8 +87,6 @@
               numtideDevshell = "default";
             };
             crates.${crateName} = { };
-            # migrationsFilter = path: _type: builtins.match ".*/migrations/.*$" path != null;
-            # srcFilter = path: type: builtins.any (f: f path type) [cargoFilter migrationsFilter];
           };
 
           packages.default = crateOutput.packages.release;

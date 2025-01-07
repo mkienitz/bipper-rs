@@ -1,6 +1,4 @@
-use sqlx::FromRow;
-
-#[derive(FromRow)]
+#[derive(Clone)]
 pub struct BlobMetadata {
     pub entropy_hash: String,
     pub filename_cipher: Vec<u8>,

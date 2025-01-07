@@ -4,3 +4,4 @@
 /store/
 /target/
 /.pre-commit-config.yaml
+/*.sqlite

@@ -63,7 +63,19 @@
             env = [
               {
                 name = "LIBRARY_PATH";
-                eval = "$DEVSHELL_DIR/lib";
+                eval = "$DEVSHELL_DIR/lib:/nix/store/lgcwrpj3yl6s2xsiwjxizbma9yi1p530-sqlite-3.47.0/lib";
+              }
+              {
+                name = "BIPPER_ADDRESS";
+                eval = "127.0.0.1";
+              }
+              {
+                name = "BIPPER_PORT";
+                eval = "3333";
+              }
+              {
+                name = "BIPPER_DATABASE_PATH";
+                eval = "db.sqlite";
               }
             ];
             devshell.startup.pre-commit.text = config.pre-commit.installationScript;
@@ -86,7 +98,12 @@
               path = ./.;
               numtideDevshell = "default";
             };
-            crates.${crateName} = { };
+            crates.${crateName}.drvConfig.mkDerivation = {
+              nativeBuildInputs = [
+                # pkgs.sqlite.dev
+                # pkgs.pkg-config
+              ];
+            };
           };
 
           packages.default = crateOutput.packages.release;

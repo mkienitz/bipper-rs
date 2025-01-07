@@ -7,7 +7,7 @@ use axum::{
     http::header,
     response::IntoResponse,
 };
-use futures_util::{stream, StreamExt};
+use futures_util::stream;
 use serde::Deserialize;
 use tokio::fs;
 

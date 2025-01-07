@@ -56,6 +56,8 @@
               [
                 pkgs.nil
                 pkgs.rust-analyzer
+                pkgs.cargo-release
+                pkgs.cargo-machete
               ]
               ++ lib.optionals pkgs.stdenv.isDarwin [
                 pkgs.libiconv
@@ -98,11 +100,7 @@
               path = ./.;
               numtideDevshell = "default";
             };
-            crates.${crateName}.drvConfig.mkDerivation = {
-              nativeBuildInputs = [
-                # pkgs.sqlite.dev
-                # pkgs.pkg-config
-              ];
+            crates.${crateName} = {
             };
           };
 

@@ -97,8 +97,6 @@
       flake =
         {
           config,
-          pkgs,
-          self,
           ...
         }:
         {
@@ -106,7 +104,6 @@
             bipper = import ./nix/module.nix inputs;
             default = config.nixosModules.bipper;
           };
-          nixosTests.bipper = import ./nix/tests.nix { inherit pkgs self; };
         };
     };
 }

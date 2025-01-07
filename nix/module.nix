@@ -30,10 +30,12 @@ in
       type = types.port;
       default = 8000;
     };
-    databasePath = mkOption {
-      description = "Path of the SQLite database file";
+    storagePath = mkOption {
+      description = ''
+        Path of the SQLite database and blob storage.
+        Needs to be writable'';
       type = types.str;
-      default = "./db.sqlite";
+      default = "/var/lib/bipper";
     };
   };
   config = mkIf cfg.enable {
@@ -51,7 +53,7 @@ in
         User = "bipper";
         Group = "bipper";
         DynamicUser = true;
-        WorkingDirectory = "/var/lib/bipper";
+        WorkingDirectory = cfg.storagePath;
         StateDirectory = "bipper";
         StateDirectoryMode = "0750";
         Restart = "on-failure";
@@ -59,7 +61,6 @@ in
       environment = {
         BIPPER_ADDRESS = cfg.address;
         BIPPER_PORT = toString cfg.port;
-        BIPPER_DATABASE_PATH = cfg.databasePath;
       };
     };
   };

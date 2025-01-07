@@ -75,10 +75,6 @@
                 name = "BIPPER_PORT";
                 eval = "3333";
               }
-              {
-                name = "BIPPER_DATABASE_PATH";
-                eval = "db.sqlite";
-              }
             ];
             devshell.startup.pre-commit.text = config.pre-commit.installationScript;
           };

@@ -11,9 +11,8 @@ use tokio::net::TcpListener;
 use tracing::debug;
 
 async fn setup() -> Result<AppState> {
-    let db_path = env::var("BIPPER_DATABASE_PATH")?;
     let state = AppState {
-        db: Database::new(&db_path).await?,
+        db: Database::new().await?,
     };
     fs::create_dir_all("store")?;
     Ok(state)

@@ -10,8 +10,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn new(database_path: &str) -> Result<Self> {
-        let conn = Connection::open(database_path).await?;
+    pub async fn new() -> Result<Self> {
+        let conn = Connection::open("db.sqlite").await?;
         conn.call(|conn| {
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS blobs (

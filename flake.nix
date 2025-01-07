@@ -117,6 +117,10 @@
           ...
         }:
         {
+          meta = {
+            description = "A simple service that stores files encrypted and indexed by a BIP39 passphrase";
+            mainProgram = "bipper";
+          };
           nixosModules = {
             bipper = import ./nix/module.nix inputs;
             default = config.nixosModules.bipper;
